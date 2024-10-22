@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automatic Screen Sharing</title>
+    <style>
+        video {
+            width: 100%;
+            height: auto;
+            margin: 10px 0;
+            border: 1px solid #000;
+        }
+    </style>
+</head>
+<body>
+    <h1>Automatic Screen Sharing Application</h1>
+    <div id="videosContainer"></div>
+
+    <script>
+        const socket = new WebSocket('ws://localhost:8000/ws/screenshare/'); // Ensure this URL is correct
+
+        // Function to create and display a video element
+        function addVideoElement(stream) {
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            video.autoplay = true;
+            video.playsInline = true;
+            document.getElementById('videosContainer').appendChild(video);
+        }
+
+        // Function to start screen sharing
+        async function startScreenSharing() {
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                addVideoElement(stream); // Show own screen
+
+                // Send the video track to the WebSocket server
+                stream.getTracks().forEach(track => {
+                    socket.send(JSON.stringify({
+                        type: 'videoTrack',
+                        trackId: track.id,
+                    }));
+
+                    track.onended = () => {
+                        socket.send(JSON.stringify({ type: 'trackEnded', trackId: track.id }));
+                    };
+                });
+            } catch (err) {
+                console.error("Error: " + err);
+                alert("Screen sharing failed: " + err.message); // Notify the user
+            }
+        }
+
+        // Automatically start screen sharing on page load
+        window.onload = startScreenSharing;
+
+        // WebSocket message handling
+        socket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+
+            // Handle incoming video track data
+            if (data.type === 'videoTrack') {
+                // Create a new MediaStream for the incoming track
+                const newStream = new MediaStream();
+                
+                // Attempt to find the shared track by ID
+                navigator.mediaDevices.getUserMedia({ video: true })
+                    .then(userStream => {
+                        const track = userStream.getTracks().find(t => t.id === data.trackId);
+                        if (track) {
+                            newStream.addTrack(track); // Add the track to the new stream
+                            addVideoElement(newStream); // Display the incoming stream
+                        }
+                    })
+                    .catch(err => console.error("Error accessing media devices: ", err));
+            } else if (data.type === 'trackEnded') {
+                console.log('A track has ended:', data.trackId);
+                // Handle cleanup if necessary
+            }
+        };
+
+        // Handle WebSocket errors
+        socket.onerror = function(error) {
+            console.error("WebSocket Error: ", error);
+        };
+
+        // Handle WebSocket closure
+        socket.onclose = function(event) {
+            console.log("WebSocket connection closed: ", event);
+        };
+    </script>
+</body>
+</html>
